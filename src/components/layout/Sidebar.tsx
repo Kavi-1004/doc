@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   Building2,
   Users,
+  UserCog,
   FileText,
   Upload,
   Truck,
@@ -26,6 +27,7 @@ const navItems = [
   { href: "/purchase-orders", label: "Purchase Orders", icon: Upload },
   { href: "/delivery-orders", label: "Delivery Orders", icon: Truck },
   { href: "/invoices", label: "Invoices", icon: Receipt },
+  { href: "/users", label: "Users", icon: UserCog },
   { href: "/logs", label: "Audit Logs", icon: ClipboardList },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
