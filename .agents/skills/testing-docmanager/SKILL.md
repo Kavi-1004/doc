@@ -1,119 +1,92 @@
 ---
 name: testing-docmanager
-description: Test DocManager ERP-lite end-to-end. Use when verifying UI, API, or workflow changes in the DocManager application.
+description: End-to-end testing of the DocManager quotation application. Use when verifying CRUD operations for Companies, Customers, Quotations, Purchase Orders, Delivery Orders, Invoices, and User Management.
 ---
 
-# Testing DocManager ERP-lite
+# Testing DocManager Application
 
-## Environment Setup
+## Prerequisites
 
-### PostgreSQL (if not already running)
-```bash
-sudo apt-get update -qq && sudo apt-get install -y -qq postgresql postgresql-client
-sudo pg_ctlcluster 14 main start
-sudo -u postgres psql -c "CREATE USER devuser WITH PASSWORD 'devpass' CREATEDB;" || true
-sudo -u postgres psql -c "CREATE DATABASE docmanager OWNER devuser;" || true
-```
+1. PostgreSQL running with database `docmanager`
+2. Dev server running: `npm run dev` (port 3000)
+3. Database seeded: `npx prisma db seed`
+4. Default admin login: `admin@docmanager.com` / `admin123`
 
-### .env File
-```bash
-cd /home/ubuntu/repos/Test
-cp .env.example .env
-# Update DATABASE_URL to: postgresql://devuser:devpass@localhost:5432/docmanager
-# Update NEXTAUTH_SECRET to any non-empty string
-```
+## Test Order (Important)
 
-### Database Schema & Seed
-```bash
-npm install
-npx prisma generate
-npx prisma db push
-npx tsx prisma/seed.ts  # Note: `prisma db seed` is not configured; run seed script directly
-```
+Modules have data dependencies. Test in this order:
 
-### Dev Server
-```bash
-npm run dev
-# Runs on http://localhost:3000
-```
+1. **Companies** - Create first (needed by Quotations, DOs, Invoices)
+2. **Customers** - Create second (needed by Quotations, DOs, Invoices)
+3. **Quotations** - Requires company + customer. Must be SENT status for PO linking.
+4. **Purchase Orders** - Requires a SENT quotation to link to
+5. **Delivery Orders** - Requires company + customer (optionally linked to APPROVED quotation)
+6. **Invoices** - Requires company + customer (optionally linked to DO)
+7. **User Management** - Independent, can be tested anytime
 
-### Database
-- PostgreSQL must be running on localhost:5432
-- Database: `docmanager`, User: `devuser`, Password: `devpass`
-- Run `npx prisma db push` if schema changes, then `npx tsx prisma/seed.ts` for test data
+## Key Testing Details
 
-### Login Credentials
-- Admin: `admin@docmanager.com` / `admin123`
-- Role-based access: admin has full access, user role has restricted access
+### Companies (`/companies`)
+- CRUD via inline form (Add Company button toggles form)
+- Required fields: Name, ShortCode
+- ShortCode auto-uppercases
+- Tax Rate affects quotation tax auto-fill
+- Logo upload uses `/api/upload` endpoint
 
-## Devin Secrets Needed
-- No secrets required for local testing — all credentials are dev-only defaults
-- For email testing: `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS` (optional — app gracefully handles missing SMTP config)
+### Customers (`/customers`)
+- CRUD via inline form
+- Required field: Name only
+- Optional: contactPerson, email, phone, address, taxId
 
-## UI/UX Testing Checklist
+### Quotations (`/quotations`)
+- New quotation at `/quotations/new` using QuotationEditor component
+- Has **live preview** panel on the right side (desktop)
+- Quotation number auto-generated: `{SHORTCODE}-Q-{YYYYMMDD}-{###}`
+- Tax rate auto-fills from selected company's taxRate
+- "Save Draft" keeps status DRAFT
+- "Save & Send" changes status to SENT
+- After first save, redirects to `/quotations/{id}/edit`
+- PDF, Email, Print buttons only appear on edit page (after save)
+- Verify totals: subtotal = sum(qty * unitPrice), tax = (subtotal - discount) * taxRate/100
 
-When testing visual/UI changes:
-1. **Maximize browser window** before recording: `sudo apt-get install -y wmctrl 2>/dev/null; wmctrl -r :ACTIVE: -b add,maximized_vert,maximized_horz`
-2. **Login page** (`/login`): Check background styling, branding elements, form card appearance, error/loading states
-3. **Sidebar**: Check logo/branding area, active navigation state styling, hover effects on all nav items including logout
-4. **Dashboard** (`/`): Check metric cards and quick action buttons for hover effects, animations, and transitions
-5. **List pages** (`/companies`, `/customers`, `/quotations`, `/purchase-orders`, `/delivery-orders`, `/invoices`): Check empty states for descriptive text and CTA buttons
-6. **Settings** (`/settings`): Click "Save Settings" to verify success confirmation styling
-7. Use the **zoom** action on computer tool to capture fine details (hover states, icons, small text)
-8. Test hover effects by using `mouse_move` to the target element and taking a screenshot
+### Purchase Orders (`/purchase-orders`)
+- "Upload PO" button opens form
+- Quotation dropdown only shows SENT quotations
+- File upload is optional (uses `/api/upload`)
+- PO number is optional text field
 
-## Key Testing Workflows
+### Delivery Orders (`/delivery-orders`)
+- New DO at `/delivery-orders/new`
+- Can optionally link to an APPROVED quotation (auto-fills items)
+- Required: company + customer
+- DO number auto-generated: `{SHORTCODE}-DO-{YYYYMMDD}-{###}`
 
-### 1. Quotation PDF Export
-- Navigate to `/quotations` and click the green download icon
-- PDF opens in new tab via `/api/quotations/{id}/pdf`
-- Verify: company header, customer details, items table, totals, footer
-- Uses `@react-pdf/renderer` server-side — no browser PDF engine needed
+### Invoices (`/invoices`)
+- New invoice at `/invoices/new`
+- Can optionally link to a delivery order (auto-fills items from linked quotation)
+- Has discount ($) and tax rate (%) fields
+- Verify calculation: grandTotal = subtotal - discount + (subtotal - discount) * taxRate/100
+- Invoice number auto-generated: `{SHORTCODE}-I-{YYYYMMDD}-{###}`
+- Invoice list shows status dropdown (Unpaid/Paid/etc.)
 
-### 2. PO File Upload
-- Navigate to `/purchase-orders` → "Upload PO"
-- **Important**: The quotation dropdown only shows quotations with `status=SENT`
-- If dropdown is empty, change quotation status: either use "Save & Send" button in quotation editor, or run:
-  ```sql
-  UPDATE "Quotation" SET status = 'SENT' WHERE "quotationNumber" = 'ACME-Q-...';
-  ```
-- File picker accepts: PDF, PNG, JPG, DOC, DOCX (max 10MB)
-- After selecting a file, filename should appear in green text
-- Upload directory: `/home/ubuntu/repos/Test/uploads` (gitignored)
+### User Management (`/users`)
+- CRUD via inline form
+- Role dropdown fetches from `/api/roles` (Admin, User)
+- Active toggle (boolean)
+- Password field: required on create, optional on edit ("leave blank to keep current")
+- Self-deletion is prevented by the API
+- Requires `users:read` / `users:write` permissions (admin role has these)
 
-### 3. Email Dialog
-- Open quotation editor (`/quotations/{id}/edit`) → click "Email" button in toolbar
-- "Email" and "PDF" buttons only appear when editing an existing quotation (not on `/quotations/new`)
-- Dialog pre-fills customer email from the database
-- Without SMTP configured, sending will return an informative error (not a crash)
+## Common Issues
 
-### 4. Invoice PDF Export
-- Requires: Company → Customer → Quotation → Delivery Order → Invoice (full workflow)
-- Navigate to `/invoices` and click download PDF icon
-- Verify: INVOICE header, invoice number, items, totals, payment details section, DO reference
+- **Port 3000 in use**: Kill existing process before starting dev server
+- **Prisma client errors**: Run `npx prisma generate` then restart dev server
+- **Empty dropdowns**: Make sure prerequisite data exists (e.g., companies/customers before quotations)
+- **PO quotation dropdown empty**: Quotation must be in SENT status
+- **Date input format**: Use MM/DD/YYYY format in browser date inputs
 
-### 5. Full Document Workflow
-1. Create Company (with short code like "ACME")
-2. Create Customer
-3. Create Quotation (split-screen editor with live preview)
-4. Send Quotation (changes status to SENT)
-5. Upload PO (linked to SENT quotation)
-6. Create Delivery Order (linked to quotation)
-7. Create Invoice (linked to DO)
+## Not Testable Without Config
 
-## Document ID Format
-- Quotation: `COMPANYSHORT-Q-YYYYMMDD-###` (e.g., ACME-Q-20260501-001)
-- Delivery Order: `COMPANYSHORT-DO-YYYYMMDD-###`
-- Invoice: `COMPANYSHORT-I-YYYYMMDD-###`
-- Revisions append `-R1`, `-R2`, etc.
-
-## Known Gotchas
-- The base branch is `base`, not `main` or `master`
-- Next.js 16 has breaking changes — read docs in `node_modules/next/dist/docs/` before modifying code
-- "middleware" file convention is deprecated in favor of "proxy" (warning is pre-existing, not a bug)
-- Quotation calculations: Subtotal - Discount + Tax = Grand Total
-- `prisma db seed` is NOT configured — use `npx tsx prisma/seed.ts` directly to seed data
-- File uploads use the Web API `FormData`, not multer middleware directly — the upload route handles `request.formData()`
-- For Playwright-based file input testing, use CDP at `http://localhost:29229` and `setInputFiles()` on the hidden file input
-- Playwright may need to be installed globally: `npm install -g playwright`, then use `NODE_PATH` to resolve it
-- When signing out to test login page, click the "Sign out" button at the bottom of the sidebar
+- Email sending (requires SMTP in .env: EMAIL_HOST, EMAIL_USER, EMAIL_PASS)
+- PDF generation (works but requires reviewing downloaded file)
+- File uploads (requires actual files and `/api/upload` endpoint with storage config)
